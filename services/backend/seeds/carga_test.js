@@ -2,13 +2,20 @@
  * @param { import("knex").Knex } knex
  * @returns { Promise<void> } 
  */
+
+const bcrypt = require('bcrypt');
 exports.seed = async function(knex) {
+
+  await knex('users').del();
+
+  const hashedPasswordTest = await bcrypt.hash('password', 10);
+  const hashedPasswordProd = await bcrypt.hash('password', 10);
 
   await knex('users').insert({
     id: 1,
     username: 'test',
     email: 'test@example.local',
-    password: 'password',
+    password: hashedPasswordTest,
     first_name: 'Test',
     last_name: 'User',
     activated: true,
@@ -22,7 +29,7 @@ exports.seed = async function(knex) {
     id: 2,
     username: 'prod',
     email: 'prod@example.local',
-    password: 'password',
+    password: hashedPasswordProd,
     first_name: 'Prod',
     last_name: 'User',
     activated: true,
