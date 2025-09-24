@@ -14,17 +14,36 @@ interface InvoiceRow {
 }
 
 class InvoiceService {
-  static async list( userId: string, status?: string, operator?: string): Promise<Invoice[]> {
-    let q = db<InvoiceRow>('invoices').where({ userId: userId });
-    if (status) q = q.andWhereRaw(" status "+ operator + " '"+ status +"'");
+  static async list(
+    userId: string,
+    status?: string,
+    operator?: string
+  ): Promise<Invoice[]> {
+    let q = db<InvoiceRow>("invoices").where({ userId: userId });
+
+    if (status && operator) {
+      const validOperators = ["=", "!=", "<", ">", "<=", ">="];
+      if (!validOperators.includes(operator)) {
+        throw new Error("Invalid operator");
+      }
+
+      if (!/^[a-zA-Z0-9_-]+$/.test(status)) {
+        throw new Error("Invalid status format");
+      }
+
+      q = q.andWhere("status", operator, status);
+    }
     const rows = await q.select();
-    const invoices = rows.map(row => ({
-      id: row.id,
-      userId: row.userId,
-      amount: row.amount,
-      dueDate: row.dueDate,
-      status: row.status} as Invoice
-    ));
+    const invoices = rows.map(
+      (row) =>
+        ({
+          id: row.id,
+          userId: row.userId,
+          amount: row.amount,
+          dueDate: row.dueDate,
+          status: row.status,
+        } as Invoice)
+    );
     return invoices;
   }
 

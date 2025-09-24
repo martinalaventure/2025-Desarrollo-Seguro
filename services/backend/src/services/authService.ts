@@ -5,7 +5,6 @@ import { User, UserRow } from "../types/user";
 import jwtUtils from "../utils/jwt";
 import ejs from "ejs";
 import bcrypt from "bcrypt"; //encontramos esta librería para hacer un hash de las contraseñas
-import "dotenv/config";
 
 
 const RESET_TTL = 1000 * 60 * 60; // 1h
