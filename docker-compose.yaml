@@ -28,6 +28,7 @@ services:
       - SMTP_PORT=1025
       - SMTP_USER=seed
       - SMTP_PASS=seed
+      - FRONTEND_URL=http://localhost:3000
     restart: unless-stopped
     depends_on:
       postgres:

@@ -2,19 +2,19 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Backend (ts-node-dev)",
       "type": "node",
       "request": "launch",
-      "name": "🔍 Debug TypeScript API",
+      "runtimeExecutable": "npx",
       "runtimeArgs": [
-        "-r",
-        "ts-node/register",
-        "-r",
-        "tsconfig-paths/register"
+        "ts-node-dev",
+        "--respawn",
+        "--transpile-only",
+        "src/index.ts"
       ],
-      "args": ["${workspaceFolder}/services/backend/src/index.ts"],
-      "cwd": "${workspaceFolder}/services/backend/",
-      "skipFiles": ["<node_internals>/**"],
-      "envFile": "${workspaceFolder}/.env"
+      "cwd": "${workspaceFolder}/services/backend",
+      "envFile": "${workspaceFolder}/services/backend/.env",
+      "console": "integratedTerminal"
     }
   ]
 }
