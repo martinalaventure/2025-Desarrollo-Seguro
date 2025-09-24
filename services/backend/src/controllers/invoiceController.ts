@@ -14,7 +14,8 @@ const listInvoices = async (req: Request, res: Response, next: NextFunction) => 
   }
 };
 
-const setPaymentCard = async (req: Request, res: Response, next: NextFunction) => {
+const setPaymentCard = [
+  async (req: Request, res: Response, next: NextFunction) => {
   try {
     const invoiceId = req.params.id;
     const paymentBrand = req.body.paymentBrand;
@@ -39,7 +40,7 @@ const setPaymentCard = async (req: Request, res: Response, next: NextFunction) =
   } catch (err) {
     next(err);
   }
-};
+}];
 
 const getInvoicePDF = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -63,6 +64,10 @@ const getInvoice = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const invoiceId = req.params.id;
     const invoice = await InvoiceService.getInvoice(invoiceId);
+
+    if (!invoice || invoice.userId !== req.user.id) {
+      return res.status(403).json({ message: 'Acceso no autorizado' });
+    }
     res.status(200).json(invoice);
 
   } catch (err) {
