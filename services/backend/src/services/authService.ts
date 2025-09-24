@@ -60,7 +60,7 @@ class AuthService {
 
     await db<UserRow>("users").insert({
       username: user.username,
-       password: hashedPassword, //almacenamos la contraseña hasheada
+      password: hashedPassword, //almacenamos la contraseña hasheada
       email: user.email,
       first_name: firstName,
       last_name: lastName,
