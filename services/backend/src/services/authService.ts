@@ -193,6 +193,7 @@ class AuthService {
         password: hashedPassword,
         invite_token: null,
         invite_token_expires: null,
+        activated: true
       })
       .where({ id: row.id });
   }
