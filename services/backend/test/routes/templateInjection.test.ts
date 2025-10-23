@@ -230,7 +230,7 @@ describe('Pruebas de Mitigación de Template Injection', () => {
     });
 
     /**
-     * TEST 4: Validación de tipos para prevenir inyección
+      TEST 4: Validación de tipos para prevenir inyección
      * 
      * Valida que el sistema rechace datos con tipos incorrectos que
      * podrían bypasear las mitigaciones.
