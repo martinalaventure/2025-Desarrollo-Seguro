@@ -66,3 +66,4 @@ def test_login(setup_create_user):
     auth_token = response.json()["token"]
     assert auth_token
 
+
