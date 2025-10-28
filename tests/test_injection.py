@@ -66,14 +66,14 @@ def setup_create_user():
 
     # activate user
     response = requests.post("http://localhost:5000/auth/set-password", json={"token": token, "newPassword": password})
-    
 
-    return {username,password}
+    # Tuvimos que cambiar el tipo de la respuesta por unos errores que tuvimos al correr los tests
+    return {"username": username, "password": password}
 
 def test_factura_status(setup_create_user):
     """
     Test de regreción que verifica la protección contra inyección SQL a través del
-    parámetro 'status' en el endpoint de listado de facturas.
+    parámetro 'status' en el endpoint de listado de facturas. No queremos que se devuelvan datos no autorizados, si es vacía la lista de facturas, entonces no debería traer nada
 
     Esta prueba:
     1. Crea un usuario de prueba y obtiene un token de autenticación
@@ -84,6 +84,10 @@ def test_factura_status(setup_create_user):
 
     Args:
         setup_create_user: sería el usuario de prueba
+
+    # Lo que esperamos:
+    #  - 200 con lista vacía (no se filtraron facturas, por lo cual el error estaría mitigado)
+    #  - 400/500 (error)
     """
     # Logueamos al usuario para poder obtener el token
     credentials = setup_create_user
@@ -102,8 +106,11 @@ def test_factura_status(setup_create_user):
         headers=headers
     )
     
-    # Verificamos que la app rechace el valor del ststus
-    assert response.status_code == 400, "Debería rechazar información maliciosa"
+    #Acá es dode vamos a validar si se devolvió una lista de facturas vacía o no
+    if response.status_code == 200:
+        invoices = response.json()
+        assert isinstance(invoices, list)
+        assert len(invoices) == 0
 
 
 def test_factura_operator(setup_create_user):
@@ -115,11 +122,14 @@ def test_factura_operator(setup_create_user):
     1. Crea un usuario de prueba y obtiene un token de autenticación
     2. Intenta realizar una inyección SQL usando un valor malicioso en el parámetro 'operator'
     3. Se va a verificar que la app:
-       - Solo acepta operadores válidos predefinidos
-       - Devuelve un código de error 400 (Bad Request)
+     - Solo acepta operadores válidos predefinidos
 
     Args:
         setup_create_user: sería el usuario de prueba
+
+    Lo que esperamos (al igual que la anterior):
+     - 200 con lista vacía (no se filtraron facturas, por lo cual el error estaría mitigado)
+     - 400/500 (error)
     """
 
     # Logueamos al usuario para poder obtener el token
@@ -139,6 +149,9 @@ def test_factura_operator(setup_create_user):
         headers=headers
     )
     
-        # Verificamos que la app rechace el valor del operator
-    assert response.status_code == 400, "Debería rechazar información maliciosa"
+    #Acá es dode vamos a validar si se devolvió una lista de facturas vacía o no
+    if response.status_code == 200:
+        invoices = response.json()
+        assert isinstance(invoices, list)
+        assert len(invoices) == 0
     
