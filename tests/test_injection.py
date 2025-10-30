@@ -6,27 +6,46 @@ import quopri
 import re
 
 """
-Estas pruebas se centran en verificar que los
-endpoints relacionados con facturas están protegidos contra ataques de inyección SQL a
-través de los parámetros de consulta.
+PRUEBAS DE REGRESIÓN PARA MITIGACIÓN DE INYECCIÓN SQL
+=====================================================
 
-Pruebas implementadas:
-1. test_factura_status: Verifica la protección contra inyección SQL
-   en el parámetro 'status' al listar facturas.
-2. test_factura_operator: Verifica la protección contra inyección SQL
-   en el parámetro 'operator' al listar facturas.
+Pruebas de regresión diseñadas para validar la NO existencia de vulnerabilidades
+de inyección SQL en la funcionalidad de visualizar facturas.
+
+CONTEXTO DE SEGURIDAD:
+- SQL Injection es una vulnerabilidad que permite ejecutar código SQL malicioso
+- Los parámetros de consulta como 'status' y 'operator' pueden ser vectores de ataque
+- Las mitigaciones incluyen: parametrización de consultas, validación de entrada, sanitización
+
+COMPORTAMIENTO ESPERADO:
+- Rama 'main' (sin mitigaciones): pruebas FALLAN (vulnerabilidad presente)
+- Rama 'practico-2' (con mitigaciones): pruebas PASAN (vulnerabilidad mitigada)
+
+VECTORES DE ATAQUE ANALIZADOS:
+- GET /invoices?status=[PAYLOAD_SQL]
+- GET /invoices?operator=[PAYLOAD_SQL]
+
+CRITERIOS DE VALIDACIÓN:
+- Payloads maliciosos NO deben ejecutar código SQL
+- Respuestas deben ser controladas (lista vacía o error apropiado)
+- NO debe haber exposición de datos no autorizados
+
+@author Desarrollo Seguro 2025
+@platform Pytest
 """
 
-# crear token, esto lo tomamos igual que en el archivo test_security.py
+# Configuración de APIs y utilidades para pruebas
 MAILHOG_API = "http://localhost:8025/api/v2/messages"
+BASE_API = "http://localhost:5000"
 
 def get_last_email_body():
+    """Obtiene el cuerpo del último email recibido desde MailHog"""
     resp = requests.get(MAILHOG_API)
     resp.raise_for_status()
     data = resp.json()
 
     if not data["items"]:
-        return None  # no emails received yet
+        return None
 
     last_email = data["items"][0]
     body = last_email["Content"]["Body"]
@@ -34,22 +53,29 @@ def get_last_email_body():
     return unquote(decoded)
 
 def extract_links(decoded_html):
+    """Extrae enlaces del HTML decodificado"""
     return re.findall(r'<a\s+href=["\']([^"\']+)["\']', decoded_html, re.IGNORECASE)[0]
 
 def extract_query_params(url):
-    # regex: busca ?token= o &token= seguido de cualquier cosa hasta &, # o fin de string
+    """Extrae el token de los parámetros de la URL"""
     patron = re.compile(r"(?:[?&])token=([^&#]+)")
     m = patron.search(url)
     return m.group(1) if m else None
 
 @pytest.fixture(autouse=True)
 def setup_create_user():
-    # random username
+    """
+    Fixture que crea y activa un usuario de prueba para las validaciones.
+    Retorna las credenciales del usuario creado.
+    """
+    # Generar usuario aleatorio para evitar conflictos
     i = random.randint(1000, 999999)
     username = f'user{i}'
     email = f'{username}@test.com'
     password = 'password'
-    salida = requests.post("http://localhost:5000/users",
+    
+    # Crear usuario
+    salida = requests.post(f"{BASE_API}/users",
                            data={
                                "username": username,
                                "password": password,
@@ -57,101 +83,237 @@ def setup_create_user():
                                "first_name": "Name",
                                "last_name": f'{username}son'
                            })
-    # user created
     assert salida.status_code == 201
 
+    # Obtener token de activación del email
     mail = get_last_email_body()
     link = extract_links(mail)
     token = extract_query_params(link)
 
-    # activate user
-    response = requests.post("http://localhost:5000/auth/set-password", json={"token": token, "newPassword": password})
+    # Activar usuario
+    response = requests.post(f"{BASE_API}/auth/set-password", 
+                           json={"token": token, "newPassword": password})
 
-    # Tuvimos que cambiar el tipo de la respuesta por unos errores que tuvimos al correr los tests
     return {"username": username, "password": password}
 
-def test_factura_status(setup_create_user):
+def test_factura_status_sql_injection(setup_create_user):
     """
-    Test de regreción que verifica la protección contra inyección SQL a través del
-    parámetro 'status' en el endpoint de listado de facturas. No queremos que se devuelvan datos no autorizados, si es vacía la lista de facturas, entonces no debería traer nada
-
-    Esta prueba:
-    1. Crea un usuario de prueba y obtiene un token de autenticación
-    2. Intenta realizar una inyección SQL usando un valor malo en el parámetro 'status'
-    3. Se va a verificar que la app:
-       - Rechaza caracteres no permitidos en el parámetro status
-       - Devuelve un código de error 400 (Bad Request)
-
-    Args:
-        setup_create_user: sería el usuario de prueba
-
-    # Lo que esperamos:
-    #  - 200 con lista vacía (no se filtraron facturas, por lo cual el error estaría mitigado)
-    #  - 400/500 (error)
+    PRUEBA DE REGRESIÓN: Inyección SQL en parámetro 'status'
+    
+    Valida que el endpoint de listado de facturas esté protegido contra
+    inyección SQL a través del parámetro 'status'.
+    
+    VECTOR DE ATAQUE:
+    - Payload: "paid' OR '1'='1" 
+    - Intenta bypasear la condición WHERE para obtener todas las facturas
+    
+    COMPORTAMIENTO ESPERADO:
+    - Rama main (vulnerable): SQL injection exitoso, puede retornar datos no autorizados
+    - Rama practico-2 (mitigada): payload tratado como valor literal, lista vacía
+    
+    CRITERIOS DE VALIDACIÓN:
+    - NO debe ejecutar código SQL malicioso
+    - Debe retornar lista vacía (no hay facturas con status literal "paid' OR '1'='1")
+    - NO debe exponer datos no autorizados
     """
-    # Logueamos al usuario para poder obtener el token
+    # Autenticación del usuario de prueba
     credentials = setup_create_user
-    login_response = requests.post("http://localhost:5000/auth/login",
+    login_response = requests.post(f"{BASE_API}/auth/login",
                                  json={"username": credentials["username"],
                                       "password": credentials["password"]})
     assert login_response.status_code == 200
     auth_token = login_response.json()["token"]
     
-    # Intento de la inyección sql a través de status
+    # Payload de SQL Injection clásico para bypass de condiciones
     headers = {"Authorization": f"Bearer {auth_token}"}
     status_malicioso = "paid' OR '1'='1"
     
+    # Ejecutar petición con payload malicioso
     response = requests.get(
-        f"http://localhost:5000/invoices?status={status_malicioso}",
+        f"{BASE_API}/invoices?status={status_malicioso}",
         headers=headers
     )
     
-    #Acá es dode vamos a validar si se devolvió una lista de facturas vacía o no
-    if response.status_code == 200:
-        invoices = response.json()
-        assert isinstance(invoices, list)
-        assert len(invoices) == 0
+    # VALIDACIÓN DE MITIGACIÓN:
+    # En sistema mitigado: debe rechazar payloads maliciosos (validation error)
+    # En sistema vulnerable: podría retornar datos no autorizados (200 con datos) o provocar un error interno (500)
+
+    # El backend implementa validación de entrada que rechaza caracteres especiales
+    # Los payloads con comillas simples deben ser rechazados por el regex /^[a-zA-Z0-9_-]+$/
+    # Rechazamos explícitamente 200 (aceptación) y 500 (error interno) como fallos de seguridad.
+    assert response.status_code != 200, f"Sistema vulnerable: payload malicioso fue aceptado y retornó status {response.status_code} - body: {response.text}"
+
+    # Aceptamos sólo errores de validación controlados (400 o 422). 500 debe considerarse fallo/interno.
+    assert response.status_code in [400, 422], f"Error inesperado o interno (posible vulnerabilidad): {response.status_code} - body: {response.text}"
+
+    # Si la respuesta contiene JSON con 'items', asegurar que no exponga datos
+    try:
+        body = response.json()
+        if isinstance(body, dict) and "items" in body:
+            assert len(body["items"]) == 0, f"Datos potencialmente expuestos en items: {body['items']}"
+    except ValueError:
+        # No JSON; la verificación por status code cubre el caso
+        pass
 
 
-def test_factura_operator(setup_create_user):
+def test_factura_operator_sql_injection(setup_create_user):
     """
-    Test de regresión que verifica la protección contra inyección SQL a través del
-    parámetro 'operator' en el endpoint de listado de facturas.
-
-    Esta prueba:
-    1. Crea un usuario de prueba y obtiene un token de autenticación
-    2. Intenta realizar una inyección SQL usando un valor malicioso en el parámetro 'operator'
-    3. Se va a verificar que la app:
-     - Solo acepta operadores válidos predefinidos
-
-    Args:
-        setup_create_user: sería el usuario de prueba
-
-    Lo que esperamos (al igual que la anterior):
-     - 200 con lista vacía (no se filtraron facturas, por lo cual el error estaría mitigado)
-     - 400/500 (error)
+    PRUEBA DE REGRESIÓN: Inyección SQL en parámetro 'operator'
+    
+    Valida que el endpoint de listado de facturas esté protegido contra
+    inyección SQL a través del parámetro 'operator'.
+    
+    VECTOR DE ATAQUE:
+    - Payload: "= OR 1=1; --"
+    - Intenta manipular la operación de comparación para obtener todos los registros
+    
+    COMPORTAMIENTO ESPERADO:
+    - Rama main (vulnerable): SQL injection exitoso, operador malicioso ejecutado
+    - Rama practico-2 (mitigada): operador validado, solo valores permitidos aceptados
+    
+    CRITERIOS DE VALIDACIÓN:
+    - Solo operadores válidos deben ser aceptados (=, !=, >, <, etc.)
+    - Payloads maliciosos deben ser rechazados
+    - NO debe ejecutar código SQL inyectado
     """
-
-    # Logueamos al usuario para poder obtener el token
+    # Autenticación del usuario de prueba
     credentials = setup_create_user
-    login_response = requests.post("http://localhost:5000/auth/login",
+    login_response = requests.post(f"{BASE_API}/auth/login",
                                  json={"username": credentials["username"],
                                       "password": credentials["password"]})
     assert login_response.status_code == 200
     auth_token = login_response.json()["token"]
     
-    # Intento de la inyección sql a través de operator
+    # Payload de SQL Injection para manipulación de operador
     headers = {"Authorization": f"Bearer {auth_token}"}
     operator_malicioso = "= OR 1=1; --"
     
+    # Ejecutar petición con operador malicioso
     response = requests.get(
-        f"http://localhost:5000/invoices?status=paid&operator={operator_malicioso}",
+        f"{BASE_API}/invoices?status=paid&operator={operator_malicioso}",
         headers=headers
     )
     
-    #Acá es dode vamos a validar si se devolvió una lista de facturas vacía o no
-    if response.status_code == 200:
-        invoices = response.json()
-        assert isinstance(invoices, list)
-        assert len(invoices) == 0
+    # VALIDACIÓN DE MITIGACIÓN:
+    # En sistema mitigado: debe rechazar operadores inválidos (whitelist validation)
+    # En sistema vulnerable: podría ejecutar la condición OR 1=1 y retornar todo
+
+    # El backend implementa whitelist de operadores válidos ["=", "!=", "<", ">", "<=", ">="]
+    # Operadores maliciosos como "= OR 1=1; --" deben ser rechazados
+    assert response.status_code != 200, f"Sistema vulnerable: operador malicioso fue aceptado y retornó status {response.status_code} - body: {response.text}"
+
+    # Aceptamos sólo errores de validación controlados (400 o 422). 500 se trata como fallo interno.
+    assert response.status_code in [400, 422], f"Error inesperado o interno (posible vulnerabilidad): {response.status_code} - body: {response.text}"
+
+    # Si la respuesta JSON contiene 'items', asegurar que no devuelve filas inesperadas
+    try:
+        body = response.json()
+        if isinstance(body, dict) and "items" in body:
+            assert len(body["items"]) == 0, f"Datos potencialmente expuestos en items: {body['items']}"
+    except ValueError:
+        pass
+
+
+def test_factura_union_based_sql_injection(setup_create_user):
+    """
+    PRUEBA DE REGRESIÓN: Inyección SQL tipo UNION
     
+    Valida protección contra ataques UNION-based SQL injection que intentan
+    extraer datos de otras tablas.
+    
+    VECTOR DE ATAQUE:
+    - Payload: "paid' UNION SELECT username,password,1,1,1 FROM users--"
+    - Intenta extraer credenciales de la tabla users
+    
+    CRITERIOS DE VALIDACIÓN:
+    - NO debe ejecutar consultas UNION no autorizadas
+    - NO debe exponer datos de otras tablas
+    - Debe tratar el payload como valor literal
+    """
+    # Autenticación del usuario de prueba
+    credentials = setup_create_user
+    login_response = requests.post(f"{BASE_API}/auth/login",
+                                 json={"username": credentials["username"],
+                                      "password": credentials["password"]})
+    assert login_response.status_code == 200
+    auth_token = login_response.json()["token"]
+    
+    # Payload UNION-based para extracción de datos
+    headers = {"Authorization": f"Bearer {auth_token}"}
+    status_union = "paid' UNION SELECT username,password,1,1,1 FROM users--"
+    
+    # Ejecutar ataque UNION
+    response = requests.get(
+        f"{BASE_API}/invoices?status={status_union}",
+        headers=headers
+    )
+    
+    # VALIDACIÓN DE MITIGACIÓN:
+    # En sistema mitigado: debe rechazar payloads con caracteres especiales (comillas)
+    # En sistema vulnerable: podría ejecutar UNION y exponer datos de otras tablas
+
+    # Rechazamos aceptación (200) y errores internos (500)
+    assert response.status_code != 200, f"Sistema vulnerable: payload UNION fue aceptado y retornó status {response.status_code} - body: {response.text}"
+    assert response.status_code in [400, 422], f"Error inesperado o interno (posible vulnerabilidad): {response.status_code} - body: {response.text}"
+
+    # Comprobación adicional: no debe contener pistas de credenciales en el body
+    try:
+        text = response.text.lower()
+        assert "username" not in text and "password" not in text, f"Posible exposición de credenciales en respuesta: {response.text}"
+    except Exception:
+        pass
+
+
+def test_factura_boolean_based_sql_injection(setup_create_user):
+    """
+    PRUEBA DE REGRESIÓN: Inyección SQL tipo Boolean-based
+    
+    Valida protección contra ataques boolean-based que usan condiciones
+    verdaderas/falsas para extraer información.
+    
+    VECTORES DE ATAQUE:
+    - Payload verdadero: "paid' AND 1=1--"
+    - Payload falso: "paid' AND 1=2--"
+    
+    CRITERIOS DE VALIDACIÓN:
+    - Ambos payloads deben ser rechazados por validación de entrada
+    - NO debe haber diferencias basadas en la lógica booleana
+    - Condiciones inyectadas NO deben ser procesadas
+    """
+    # Autenticación del usuario de prueba
+    credentials = setup_create_user
+    login_response = requests.post(f"{BASE_API}/auth/login",
+                                 json={"username": credentials["username"],
+                                      "password": credentials["password"]})
+    assert login_response.status_code == 200
+    auth_token = login_response.json()["token"]
+    
+    headers = {"Authorization": f"Bearer {auth_token}"}
+    
+    # Payload con condición verdadera
+    status_true = "paid' AND 1=1--"
+    response_true = requests.get(
+        f"{BASE_API}/invoices?status={status_true}",
+        headers=headers
+    )
+    
+    # Payload con condición falsa
+    status_false = "paid' AND 1=2--"
+    response_false = requests.get(
+        f"{BASE_API}/invoices?status={status_false}",
+        headers=headers
+    )
+    
+    # VALIDACIÓN DE MITIGACIÓN:
+    # En sistema mitigado: ambos payloads deben ser rechazados por validación
+    # En sistema vulnerable: podrían retornar resultados diferentes
+
+    # Ambos payloads contienen comillas simples y deben ser rechazados
+    assert response_true.status_code != 200, f"Sistema vulnerable: payload booleano TRUE fue aceptado - body: {response_true.text}"
+    assert response_false.status_code != 200, f"Sistema vulnerable: payload booleano FALSE fue aceptado - body: {response_false.text}"
+
+    # Ambos deben retornar el mismo tipo de error (validación consistente) y no ser 500
+    assert response_true.status_code == response_false.status_code, \
+        f"Inconsistencia en validación: diferentes códigos de error para payloads similares: {response_true.status_code} vs {response_false.status_code}"
+
+    assert response_true.status_code in [400, 422], f"Error inesperado o interno (posible vulnerabilidad): {response_true.status_code} - body: {response_true.text}"
