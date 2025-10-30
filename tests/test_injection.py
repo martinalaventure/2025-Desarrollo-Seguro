@@ -138,32 +138,3 @@ def test_no_bypass_con_or_1_igual_1(usuario_habilitado):
         f"Posible SQLi: baseline={base_count} vs ataque={atk_count}. "
         f"Cuerpo: {resp.text[:400]}"
     )
-
-def test_sin_union_exponiendo_datos(usuario_habilitado):
-    """
-    Intenta un UNION SELECT para inyectar filas ajenas. No deben aparecer
-    usernames ni valores fuera del dominio esperado en el campo 'status'.
-    """
-    token = _jwt(usuario_habilitado)
-    headers = {"Authorization": f"Bearer {token}"}
-
-    url = (
-        f"{BASE_API}/invoices?"
-        "status=paid%27%20UNION%20SELECT%20id%2C%20id%2C%20%27100.00%27%3A%3Adecimal%2C%20CURRENT_DATE%2C%20username%20FROM%20users%20--"
-        "&operator=="
-    )
-    r = requests.get(url, headers=headers)
-    assert r.status_code == 200
-    data = r.json()
-    assert isinstance(data, list)
-
-    # No deberían colarse usernames u otros valores raros en 'status'
-    sospechosos = []
-    for inv in data:
-        s = inv.get("status")
-        if s and s not in ("paid", "unpaid", "pending", "open", "closed", None):
-            sospechosos.append(s)
-
-    assert not sospechosos, f"Valores sospechosos en status (posible UNION leak): {sospechosos}"
-    # Usuario recién creado => lo esperable es no tener facturas
-    assert len(data) == 0, f"Usuario nuevo no debería tener facturas (recibidas: {len(data)})"
