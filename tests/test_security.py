@@ -65,4 +65,43 @@ def test_login(setup_create_user):
     response = requests.post("http://localhost:5000/auth/login", json={"username": username, "password": password})
     auth_token = response.json()["token"]
     assert auth_token
+    
+def get_token(setup_create_user):
+    username = setup_create_user[0]
+    password = setup_create_user[1]
+    
+    response = requests.post("http://localhost:5000/auth/login", json={"username": username, "password": password})
+    assert response.status_code == 200
+    return response.json()["token"]
 
+
+def test_listado_facturas_1_igual_1(setup_create_user):
+    """
+    Verificar que el filtro por `status` en /invoices NO sea vulnerable con `OR 1=1 --`. 
+    Si el backend arma la consulta con concatenación de
+    strings (vulnerable), el WHERE queda siempre verdadero y devuelve filas que no
+    corresponden al usuario autenticado. En un backend bien mitigado, el payload
+    se trata como valor literal y la respuesta es segura.
+    """
+
+    # 1) Obtener token de autenticación (el fixture ya creó y activó el usuario)
+    token = get_token(setup_create_user)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 2) Payload de ataque: fuerza un WHERE siempre-verdadero si hubiera concatenación
+    #    status = "paid' or 1=1 --"
+    #    operator = "="
+    url = "http://localhost:5000/invoices?status=paid%27%20or%201=1%20--&operator=="
+
+    # 3) Ejecutar la petición con el payload malicioso
+    response = requests.get(url, headers=headers, timeout=5)
+
+    # 4) Validaciones mínimas de contrato
+    assert response.status_code == 200, f"Se esperaba 200, llegó {response.status_code}: {response.text[:300]}"
+    invoices = response.json()
+    assert isinstance(invoices, list), f"Se esperaba una lista JSON, llegó: {type(invoices)}"
+
+    # 5) Condición clave de seguridad:
+    #    En un sistema NO vulnerable, el usuario sin facturas debe recibir lista VACÍA.
+    #    Si vinieran elementos, es indicio de que `OR 1=1` alteró el WHERE.
+    assert len(invoices) == 0, "Posible SQL injection: llegaron facturas para un usuario sin registros."
